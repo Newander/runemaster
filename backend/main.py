@@ -1,3 +1,6 @@
+from arango import ArangoClient
+
+
 class Task:
     def __init__(self, name: str):
         self.name = name
@@ -37,7 +40,14 @@ class Pipeline:
 
     def dump(self):
         """ Записывает пайплайн в Арангу """
-        pass
+        client = ArangoClient(hosts="http://localhost:8529")
+        db = client.db("test", username="root")
+        pipeline = db.create_collection("pipeline")
+        upd_pipe = pipeline.get({'name': self.name})
+
+        result = upd_pipe.result()
+        pipeline.update()   # todo: stop here
+
 
 
 if __name__ == '__main__':
