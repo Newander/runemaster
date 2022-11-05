@@ -1,7 +1,7 @@
 from abc import ABC
 
 from arango import ArangoClient
-from arango.collection import VertexCollection
+from arango.collection import StandardCollection, VertexCollection
 from arango.graph import Graph
 
 
@@ -11,7 +11,7 @@ class ArangoModuleMixin(ABC):
         self.record: dict | None = None  # Arango`s record dictionary
 
     @classmethod
-    def from_arango(cls, ar_kwargs: dict):
+    def from_arango(cls, collection: StandardCollection):
         return cls(**{k: v for k, v in ar_kwargs.items() if k not in ('_id', '_key')})  # todo: check
 
     def kwargs(self):
@@ -128,26 +128,3 @@ class Pipeline(ArangoModuleMixin):
         else:
             pipeline.insert(self.construct_record())
 
-
-if __name__ == '__main__':
-    client = ArangoClient(hosts='http://localhost:8529')
-    db = client.db('test', username='root')
-    task_graph = db.graph("task_graph")
-    pipeline = db.collection('pipeline')
-    task = task_graph.vertex_collection("task")
-    edges = task_graph.edge_collection("next")
-
-    pipeline.truncate()
-    task.truncate()
-    edges.truncate()
-
-    # todo: Scenario - construct pipeline
-    pipe = Pipeline('test_pipeline')
-    download = Task(pipe.name, 'download')
-    sql_query = Task(pipe.name, 'sql_query')
-    upload = Task(pipe.name, 'upload')
-
-    pipe.add(download >> sql_query >> upload)
-    pipe.dump()
-
-    # todo: Scenario - execute pipeline
