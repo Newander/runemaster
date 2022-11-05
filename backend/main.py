@@ -5,7 +5,7 @@ from arango import ArangoClient
 from arango.collection import StandardCollection, VertexCollection
 from arango.graph import Graph
 
-TaskOrderedType = list[list['Task']]
+TaskOrderedType = list['Task']
 
 
 class ArangoModuleMixin(ABC):
@@ -40,13 +40,18 @@ class Task(ArangoModuleMixin):
 
     @classmethod
     def from_arango_record(cls, collection: StandardCollection, record: dict):
-        return cls(**{k: v for k, v in record.items() if not k.startswith('_')})
+        instance = cls(
+            **{k: v for k, v in record.items() if not k.startswith('_') and k not in ('attributes', 'task_type')}
+        )
+        instance.attributes = record['attributes']
+        return instance
 
     def __init__(self, pipeline_key: str, name: str):
         super().__init__()
         self.pipeline_key = pipeline_key
         self.name = name
-        self.filled_attrs = {}
+        self.attributes = {}
+        self.task_type = str(self.__class__.__name__)
 
     def __rshift__(self, other):
         if not isinstance(other, Task):
@@ -54,8 +59,12 @@ class Task(ArangoModuleMixin):
 
         return TaskGraph(self.pipeline_key, init_task=self) >> other
 
+    def __repr__(self):
+        return f'<{self.__class__.__name__} #{self.key()}>'
+
     def kwargs(self):
-        return {'pipeline_key': self.pipeline_key, 'name': self.name}
+        return {'pipeline_key': self.pipeline_key, 'name': self.name, 'attributes': self.attributes,
+                'task_type': self.task_type}
 
     def key(self):
         return f'{self.pipeline_key}_{self.name}'
@@ -71,8 +80,7 @@ class Task(ArangoModuleMixin):
             if not found:
                 raise ValueError(f'An input attribute with id {id_} was not find')
 
-            self.filled_attrs[id_] = {'input_attribute': source_attr, }#todo: working on here
-
+            self.attributes[id_] = {'input_attribute': source_attr, 'value': value}
 
     def insert(self, ar_task: VertexCollection) -> dict:
         self.record = ar_task.insert({'_key': self.key(), **self.kwargs()})
@@ -84,33 +92,44 @@ class DownloadTask(Task):
 
     input_attributes = [
         {'id': 'source', 'name': 'Source', 'type': 'choose', 'variants': ['Local File System']},
-        {'id': 'path', 'name': 'Path', 'type': 'input'}
+        {'id': 'path', 'name': 'Path', 'type': 'input'},
     ]
+
+    def execute(self):
+        if self.attributes['source']['value'] == 'Local File System':
+            return open(self.attributes['path']['value']).read()
+        else:
+            raise ValueError('Unknown source')
 
 
 class TaskGraph:
 
     @classmethod
-    def from_arango(cls, collection: StandardCollection, pipeline_key: str, tasks: list[list[dict]]):
-        task_ordered = [[Task.from_arango_record(collection, task) for task in task_group] for task_group in tasks]
+    def from_arango(cls, collection: StandardCollection, pipeline_key: str, tasks: list[dict]):
+        def find_task_class_by_name(task_cls_name: str):
+            for sub_cls in Task.__subclasses__():
+                if sub_cls.__name__ == task_cls_name:
+                    return sub_cls
+            return Task
+
+        task_ordered = [
+            find_task_class_by_name(task['task_type']).from_arango_record(collection, task) for task in tasks
+        ]
         return cls(pipeline_key, task_ordered=task_ordered)
 
     def __init__(self, pipeline_key: str, init_task: Task = None, task_ordered: TaskOrderedType = None):
         self.pipeline_key = pipeline_key
         self.task_ordered: TaskOrderedType = task_ordered or []
-        self.steps = {i: task_group for i, task_group in enumerate(self.task_ordered)} or {0: []}
 
         if init_task:
             if not isinstance(init_task, Task):
                 raise Exception('Unprocessable type!')
 
-            self.task_ordered.append([init_task])
-            self.steps[0].append(init_task)
+            self.task_ordered.append(init_task)
 
     def __rshift__(self, other):
         if isinstance(other, Task):
-            self.task_ordered.append([other])
-            self.steps[max(self.steps) + 1] = [other]
+            self.task_ordered.append(other)
             return self
         elif isinstance(other, TaskGraph):
             if not self and other:
@@ -127,18 +146,12 @@ class TaskGraph:
         task = ar_graph.vertex_collection("task")
         edges = ar_graph.edge_collection("next")
 
-        prev_tasks_ar = []
-        for task_step in self.task_ordered:
-            now_task_ar = []
-            for task_instance in task_step:
-                ar_task = task_instance.insert(task)
-                now_task_ar.append(ar_task)
-
-            for prev_ar_task in prev_tasks_ar:
-                for now_ar_task in now_task_ar:
-                    edges.insert({"_from": prev_ar_task['_id'], "_to": now_ar_task['_id']})
-
-            prev_tasks_ar = now_task_ar
+        prev_task_ar = None
+        for task_instance in self.task_ordered:
+            now_task_ar = task_instance.insert(task)
+            if prev_task_ar:
+                edges.insert({"_from": prev_task_ar['_id'], "_to": now_task_ar['_id']})
+            prev_task_ar = now_task_ar
 
 
 class Pipeline(ArangoModuleMixin):
@@ -165,8 +178,7 @@ class Pipeline(ArangoModuleMixin):
 
     def kwargs(self):
         return {'name': self.name,
-                'tasks': [[task.construct_record() for task in task_group] for task_group in
-                          self.task_graph.task_ordered]}
+                'tasks': [task.construct_record() for task in self.task_graph.task_ordered]}
 
     def key(self):
         return f'{self.name}'
@@ -193,12 +205,16 @@ class Pipeline(ArangoModuleMixin):
 class LocalStorage:
     def __init__(self, os_path: str = '/volumes/local'):
         self.path = Path(os_path)
+        self.path.mkdir(exist_ok=True, parents=True)
 
     def prepare_pipeline(self, pipeline_key: str):
         (self.path / pipeline_key).mkdir(exist_ok=True)
 
     def prepare_task(self, pipeline_key: str, task_key: str):
         (self.path / pipeline_key / task_key).mkdir(exist_ok=True)
+
+    def save_dataset(self, pipeline_key: str, task_key: str, new_dataset: str, file_name: str):
+        (self.path / pipeline_key / task_key / file_name).write_text(new_dataset)
 
 
 class LocalEngine:
@@ -209,10 +225,11 @@ class LocalEngine:
 
     def run(self, pipeline: Pipeline):
         self.storage.prepare_pipeline(pipeline.key())
-        for task_group in pipeline:
-            for task in task_group:
-                self.storage.prepare_task(pipeline.key(), task.key())
-                if isinstance(task, DownloadTask):  # todo: Tasks
-                    ...
-                else:
-                    raise ValueError(f'We don\'t support {task}')
+        for task in pipeline:
+            self.storage.prepare_task(pipeline.key(), task.key())
+            if isinstance(task, DownloadTask):
+                new_dataset = task.execute()
+                self.storage.save_dataset(pipeline.key(), task.key(), new_dataset,
+                                          file_name=Path(task.attributes['path']['value']).name)
+            else:  # todo: Tasks
+                raise ValueError(f'We don\'t support {task}')
