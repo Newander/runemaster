@@ -36,6 +36,7 @@ class ArangoModuleMixin(ABC):
 
 
 class Task(ArangoModuleMixin):
+    input_attributes: list[dict]
 
     @classmethod
     def from_arango_record(cls, collection: StandardCollection, record: dict):
@@ -45,6 +46,7 @@ class Task(ArangoModuleMixin):
         super().__init__()
         self.pipeline_key = pipeline_key
         self.name = name
+        self.filled_attrs = {}
 
     def __rshift__(self, other):
         if not isinstance(other, Task):
@@ -58,9 +60,32 @@ class Task(ArangoModuleMixin):
     def key(self):
         return f'{self.pipeline_key}_{self.name}'
 
+    def set_input_attributes(self, **input_attributes):
+        for id_, value in input_attributes.items():
+            found = False
+            for source_attr in self.input_attributes:
+                if source_attr['id'] == id_:
+                    found = True
+                    break
+
+            if not found:
+                raise ValueError(f'An input attribute with id {id_} was not find')
+
+            self.filled_attrs[id_] = {'input_attribute': source_attr, }#todo: working on here
+
+
     def insert(self, ar_task: VertexCollection) -> dict:
         self.record = ar_task.insert({'_key': self.key(), **self.kwargs()})
         return self.record
+
+
+class DownloadTask(Task):
+    """ Task to load file into system """
+
+    input_attributes = [
+        {'id': 'source', 'name': 'Source', 'type': 'choose', 'variants': ['Local File System']},
+        {'id': 'path', 'name': 'Path', 'type': 'input'}
+    ]
 
 
 class TaskGraph:

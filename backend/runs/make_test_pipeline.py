@@ -1,6 +1,6 @@
 from arango import ArangoClient
 
-from backend.main import Pipeline, Task
+from backend.main import DownloadTask, Pipeline, Task
 
 if __name__ == '__main__':
     # Initialization of connection
@@ -17,7 +17,8 @@ if __name__ == '__main__':
     edges.truncate()
 
     pipe = Pipeline('test_pipeline')
-    download = Task(pipe.name, 'download')
+    download = DownloadTask(pipe.name, 'download')
+    download.set_input_attributes(source='Local File System', path='/home/newander/PIK_DWH_web_accounts.csv')
     sql_query = Task(pipe.name, 'sql_query')
     upload = Task(pipe.name, 'upload')
 
