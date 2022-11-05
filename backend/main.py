@@ -1,18 +1,27 @@
 from abc import ABC
+from pathlib import Path
 
 from arango import ArangoClient
 from arango.collection import StandardCollection, VertexCollection
 from arango.graph import Graph
 
+TaskOrderedType = list[list['Task']]
+
 
 class ArangoModuleMixin(ABC):
 
-    def __init__(self, *args, **kwargs):
-        self.record: dict | None = None  # Arango`s record dictionary
+    @classmethod
+    def from_arango(cls, collection: StandardCollection, key: str):
+        record = collection.get({'_key': key})
+        instance = cls.from_arango_record(collection, record)
+        return instance
 
     @classmethod
-    def from_arango(cls, collection: StandardCollection):
-        return cls(**{k: v for k, v in ar_kwargs.items() if k not in ('_id', '_key')})  # todo: check
+    def from_arango_record(cls, collection: StandardCollection, record: dict):
+        raise NotImplementedError
+
+    def __init__(self, *args, **kwargs):
+        self.record: dict | None = None  # Arango`s record dictionary
 
     def kwargs(self):
         """ Make a dictionary with all necessary for initialization arguments """
@@ -27,6 +36,11 @@ class ArangoModuleMixin(ABC):
 
 
 class Task(ArangoModuleMixin):
+
+    @classmethod
+    def from_arango_record(cls, collection: StandardCollection, record: dict):
+        return cls(**{k: v for k, v in record.items() if not k.startswith('_')})
+
     def __init__(self, pipeline_key: str, name: str):
         super().__init__()
         self.pipeline_key = pipeline_key
@@ -50,10 +64,16 @@ class Task(ArangoModuleMixin):
 
 
 class TaskGraph:
-    def __init__(self, pipeline_key: str, init_task: Task = None):
+
+    @classmethod
+    def from_arango(cls, collection: StandardCollection, pipeline_key: str, tasks: list[list[dict]]):
+        task_ordered = [[Task.from_arango_record(collection, task) for task in task_group] for task_group in tasks]
+        return cls(pipeline_key, task_ordered=task_ordered)
+
+    def __init__(self, pipeline_key: str, init_task: Task = None, task_ordered: TaskOrderedType = None):
         self.pipeline_key = pipeline_key
-        self.task_ordered: list[list[Task]] = []
-        self.steps = {0: []}
+        self.task_ordered: TaskOrderedType = task_ordered or []
+        self.steps = {i: task_group for i, task_group in enumerate(self.task_ordered)} or {0: []}
 
         if init_task:
             if not isinstance(init_task, Task):
@@ -97,15 +117,31 @@ class TaskGraph:
 
 
 class Pipeline(ArangoModuleMixin):
+    @classmethod
+    def from_arango_record(cls, collection: StandardCollection, record: dict):
+        instance = cls(name=record['name'])
+        task_graph = TaskGraph.from_arango(collection, pipeline_key=instance.key(), tasks=record['tasks'])
+
+        instance.task_graph = task_graph
+        instance.record = record
+
+        return instance
+
     def __init__(self, name: str, task_graph: TaskGraph = None):
         super().__init__()
         self.name = name
         self.task_graph = task_graph or TaskGraph(pipeline_key=self.name)
 
-    # todo: step 1:
+    def __repr__(self):
+        return f'<Pipeline #{self.key()}>'
+
+    def __iter__(self):
+        yield from self.task_graph.task_ordered
+
     def kwargs(self):
         return {'name': self.name,
-                'tasks': [[task.record for task in task_group] for task_group in self.task_graph.task_ordered]}
+                'tasks': [[task.construct_record() for task in task_group] for task_group in
+                          self.task_graph.task_ordered]}
 
     def key(self):
         return f'{self.name}'
@@ -128,3 +164,30 @@ class Pipeline(ArangoModuleMixin):
         else:
             pipeline.insert(self.construct_record())
 
+
+class LocalStorage:
+    def __init__(self, os_path: str = '/volumes/local'):
+        self.path = Path(os_path)
+
+    def prepare_pipeline(self, pipeline_key: str):
+        (self.path / pipeline_key).mkdir(exist_ok=True)
+
+    def prepare_task(self, pipeline_key: str, task_key: str):
+        (self.path / pipeline_key / task_key).mkdir(exist_ok=True)
+
+
+class LocalEngine:
+    """ Running pipeline """
+
+    def __init__(self):
+        self.storage = LocalStorage()
+
+    def run(self, pipeline: Pipeline):
+        self.storage.prepare_pipeline(pipeline.key())
+        for task_group in pipeline:
+            for task in task_group:
+                self.storage.prepare_task(pipeline.key(), task.key())
+                if isinstance(task, DownloadTask):  # todo: Tasks
+                    ...
+                else:
+                    raise ValueError(f'We don\'t support {task}')

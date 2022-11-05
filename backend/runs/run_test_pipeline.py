@@ -1,6 +1,6 @@
 from arango import ArangoClient
 
-from backend.main import Pipeline, Task
+from backend.main import LocalEngine, Pipeline
 
 if __name__ == '__main__':
     # Initialization of connection
@@ -12,4 +12,7 @@ if __name__ == '__main__':
     edges = task_graph.edge_collection("next")
 
     # The script
-    Pipeline.from_arango()
+    pipe = Pipeline.from_arango(pipeline, 'test_pipeline')
+    engine = LocalEngine()
+    engine.run(pipe)
+    print(pipe)
