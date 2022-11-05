@@ -1,6 +1,8 @@
 from abc import ABC
+from io import StringIO
 from pathlib import Path
 
+import pandas as pd
 from arango import ArangoClient
 from arango.collection import StandardCollection, VertexCollection
 from arango.graph import Graph
@@ -100,6 +102,33 @@ class DownloadTask(Task):
             return open(self.attributes['path']['value']).read()
         else:
             raise ValueError('Unknown source')
+
+
+class CSVQueryTask(Task):
+    """ Querying CSV files in a specific language """
+
+    input_attributes = [
+        {'id': 'columns', 'name': 'Columns', 'type': 'input', 'optional': True},
+        {'id': 'query', 'name': 'Query [specific language]', 'type': 'input'},
+    ]
+
+    def execute(self, csv_string: str):
+        columns = self.attributes['columns']['value'].split(',')
+        query_dict = self.attributes['query']['value']
+
+        csv_pd = pd.read_csv(StringIO(csv_string), names=columns)
+
+        csv_result = pd.DataFrame()
+        for field, (operator, add) in query_dict.items():
+            if operator == 'select':
+                if add == 'distinct':
+                    csv_result[field] = sorted(csv_pd[field].unique())
+                else:
+                    raise ValueError('Unknown addition command')
+            else:
+                raise ValueError('Unknown operator')
+
+        return csv_result.to_csv(index=False)
 
 
 class TaskGraph:
@@ -216,6 +245,9 @@ class LocalStorage:
     def save_dataset(self, pipeline_key: str, task_key: str, new_dataset: str, file_name: str):
         (self.path / pipeline_key / task_key / file_name).write_text(new_dataset)
 
+    def get_dataset(self, pipeline_key: str, task_key: str, file_name: str):
+        return (self.path / pipeline_key / task_key / file_name).read_text()
+
 
 class LocalEngine:
     """ Running pipeline """
@@ -225,11 +257,17 @@ class LocalEngine:
 
     def run(self, pipeline: Pipeline):
         self.storage.prepare_pipeline(pipeline.key())
-        for task in pipeline:
+        for prev_task, task in zip([None] + list(pipeline), pipeline):
             self.storage.prepare_task(pipeline.key(), task.key())
             if isinstance(task, DownloadTask):
                 new_dataset = task.execute()
                 self.storage.save_dataset(pipeline.key(), task.key(), new_dataset,
                                           file_name=Path(task.attributes['path']['value']).name)
+            elif isinstance(task, CSVQueryTask):
+                dataset = self.storage.get_dataset(pipeline.key(), prev_task.key(),
+                                                   file_name=Path(prev_task.attributes['path']['value']).name)
+                new_dataset = task.execute(dataset)
+                self.storage.save_dataset(pipeline.key(), task.key(), new_dataset,  # todo: invent something for file_names
+                                          file_name=Path(prev_task.attributes['path']['value']).name)
             else:  # todo: Tasks
                 raise ValueError(f'We don\'t support {task}')
