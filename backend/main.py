@@ -3,6 +3,7 @@ from io import StringIO
 from pathlib import Path
 
 import pandas as pd
+import paramiko as paramiko
 from arango import ArangoClient
 from arango.collection import StandardCollection, VertexCollection
 from arango.graph import Graph
@@ -104,6 +105,27 @@ class DownloadTask(Task):
             raise ValueError('Unknown source')
 
 
+class SSHUploadTask(Task):
+    """ Task to upload file into a different file system through SSH """
+
+    input_attributes = [
+        {'id': 'ssh_host', 'name': 'Hostname', 'type': 'input'},
+        {'id': 'ssh_user', 'name': 'User', 'type': 'input'},
+        {'id': 'ssh_password', 'name': 'Password', 'type': 'input'},
+        {'id': 'remote_path', 'name': 'Path On Remote Host', 'type': 'input'},
+    ]
+
+    def execute(self, local_dataset_path: str | Path):
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh_client.connect(hostname=self.attributes['ssh_host']['value'],
+                           username=self.attributes['ssh_user']['value'],
+                           password=self.attributes['ssh_password']['value'])
+        ftp_client = ssh_client.open_sftp()
+        ftp_client.put(local_dataset_path, str(Path(self.attributes['remote_path']['value']) / local_dataset_path.name))
+        ftp_client.close()
+
+
 class CSVQueryTask(Task):
     """ Querying CSV files in a specific language """
 
@@ -198,6 +220,7 @@ class Pipeline(ArangoModuleMixin):
         super().__init__()
         self.name = name
         self.task_graph = task_graph or TaskGraph(pipeline_key=self.name)
+        self.variables = {}
 
     def __repr__(self):
         return f'<Pipeline #{self.key()}>'
@@ -206,7 +229,7 @@ class Pipeline(ArangoModuleMixin):
         yield from self.task_graph.task_ordered
 
     def kwargs(self):
-        return {'name': self.name,
+        return {'name': self.name, 'variables': self.variables,
                 'tasks': [task.construct_record() for task in self.task_graph.task_ordered]}
 
     def key(self):
@@ -236,6 +259,9 @@ class LocalStorage:
         self.path = Path(os_path)
         self.path.mkdir(exist_ok=True, parents=True)
 
+    def local_dataset_path(self, pipeline_key: str, task_key: str, file_name: str):
+        return self.path / pipeline_key / task_key / file_name
+
     def prepare_pipeline(self, pipeline_key: str):
         (self.path / pipeline_key).mkdir(exist_ok=True)
 
@@ -243,10 +269,10 @@ class LocalStorage:
         (self.path / pipeline_key / task_key).mkdir(exist_ok=True)
 
     def save_dataset(self, pipeline_key: str, task_key: str, new_dataset: str, file_name: str):
-        (self.path / pipeline_key / task_key / file_name).write_text(new_dataset)
+        self.local_dataset_path(pipeline_key, task_key, file_name).write_text(new_dataset)
 
     def get_dataset(self, pipeline_key: str, task_key: str, file_name: str):
-        return (self.path / pipeline_key / task_key / file_name).read_text()
+        return self.local_dataset_path(pipeline_key, task_key, file_name).read_text()
 
 
 class LocalEngine:
@@ -261,13 +287,20 @@ class LocalEngine:
             self.storage.prepare_task(pipeline.key(), task.key())
             if isinstance(task, DownloadTask):
                 new_dataset = task.execute()
+                pipeline.variables['native_file_name'] = Path(task.attributes['path']['value']).name
                 self.storage.save_dataset(pipeline.key(), task.key(), new_dataset,
-                                          file_name=Path(task.attributes['path']['value']).name)
+                                          file_name=pipeline.variables['native_file_name'])
             elif isinstance(task, CSVQueryTask):
                 dataset = self.storage.get_dataset(pipeline.key(), prev_task.key(),
-                                                   file_name=Path(prev_task.attributes['path']['value']).name)
+                                                   file_name=pipeline.variables['native_file_name'])
                 new_dataset = task.execute(dataset)
-                self.storage.save_dataset(pipeline.key(), task.key(), new_dataset,  # todo: invent something for file_names
-                                          file_name=Path(prev_task.attributes['path']['value']).name)
+                self.storage.save_dataset(pipeline.key(), task.key(), new_dataset,
+                                          file_name=pipeline.variables['native_file_name'])
+            elif isinstance(task, SSHUploadTask):
+                task.execute(
+                    local_dataset_path=self.storage.local_dataset_path(
+                        pipeline.key(), prev_task.key(), pipeline.variables['native_file_name']
+                    )
+                )
             else:  # todo: Tasks
                 raise ValueError(f'We don\'t support {task}')

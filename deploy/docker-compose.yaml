@@ -3,8 +3,9 @@ version: '3.8'
 services:
   db:
     image: arangodb/arangodb:3.10.0
-    ports:
-      - '8529:8529'
+    #    ports:
+    #      - '8529:8529'
+    network_mode: host
     environment:
       - ARANGO_NO_AUTH=1
     volumes:

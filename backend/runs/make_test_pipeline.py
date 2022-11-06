@@ -1,6 +1,6 @@
 from arango import ArangoClient
 
-from backend.main import CSVQueryTask, DownloadTask, Pipeline, Task
+from backend.main import CSVQueryTask, DownloadTask, Pipeline, SSHUploadTask
 
 if __name__ == '__main__':
     # Initialization of connection
@@ -22,7 +22,13 @@ if __name__ == '__main__':
     csv_query = CSVQueryTask(pipe.name, 'csv_query')
     csv_query.set_input_attributes(columns='id,connector_id,caption,state,credentials,create_date',
                                    query={'connector_id': ['select', 'distinct']})
-    upload = Task(pipe.name, 'upload')
+    upload = SSHUploadTask(pipe.name, 'upload')
+    upload.set_input_attributes(
+        ssh_host='10.97.100.218',
+        ssh_user='gavrilovsa',
+        ssh_password=None,
+        remote_path='/home/gavrilovsa'
+    )
 
     pipe.add(download >> csv_query >> upload)
     pipe.dump()
