@@ -1,6 +1,6 @@
 from arango import ArangoClient
 
-from backend.main import CSVQueryTask, DownloadTask, Pipeline, SSHUploadTask
+from backend.src.main import CSVQueryTask, DownloadTask, Pipeline, SSHUploadTask
 
 if __name__ == '__main__':
     # Initialization of connection

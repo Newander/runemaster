@@ -1,6 +1,6 @@
 from arango import ArangoClient
 
-from backend.main import LocalEngine, Pipeline
+from backend.src.main import LocalEngine, Pipeline
 
 if __name__ == '__main__':
     # Initialization of connection
