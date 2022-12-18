@@ -3,7 +3,7 @@ from io import StringIO
 from pathlib import Path
 
 import pandas as pd
-import paramiko as paramiko
+import paramiko
 from arango import ArangoClient
 from arango.collection import StandardCollection, VertexCollection
 from arango.graph import Graph

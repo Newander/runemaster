@@ -6,13 +6,51 @@
 """
 import sys
 
+from backend.cli import list_pipelines, list_tasks
 from backend.server.run import run_server
+
+
+def show_pipelines():
+    print('Existed pipelines:')
+    for p in list_pipelines():
+        print(f' - Pipeline [{p["name"]}]: tasks: {p["tasks"]}')
+
+
+def show_tasks(pipeline: str = None):
+    print('Pipelines / tasks:')
+    for p in list_pipelines():
+        print(f' - Pipeline [{p["name"]}]:')
+        for t in list_tasks(p['key']):
+            print(f'    - Task [{t["name"]}]: {t["task_type"]}')
+
 
 commands_tree = {
     'help': 'CLI manager of Runemaster project',
     'commands': {
         'cli': {
-            'commands': {'list'},
+            'commands': {
+                'list': {
+                    'commands': {
+                        'pipelines': {
+                            'help': 'cli list pipelines',
+                            'function': show_pipelines
+                        },
+                        'tasks': {
+                            'options': {'pipeline'},
+                            'help': 'backend run helper',
+                            'function': show_tasks
+                        }
+                    },
+                    'help': 'help cli list'
+                },
+                'get': {
+                    'help': 'help cli get'
+
+                },
+                'rm': {
+                    'help': 'help cli rm'
+                },
+            },
             'help': 'help 2 level cli'
         },
         'backend': {
@@ -72,10 +110,10 @@ if __name__ == '__main__':
     else:
         command_description = dive_parsing(arguments_list, commands_tree)
 
-        print(command_description)
-        print(options)
+        # print(command_description)
+        # print(options)
 
-        if set(options) & command_description['options'] != set(options):
+        if set(options) & command_description.get('options', set()) != set(options):
             raise Exception('Incorrect options')
 
         command_description['function'](**options)

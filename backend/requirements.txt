@@ -1,3 +1,5 @@
 fastapi
 python-arango==7.5.4
 uvicorn
+pandas
+paramiko
