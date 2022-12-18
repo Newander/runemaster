@@ -89,6 +89,10 @@ class Task(ArangoModuleMixin):
         self.record = ar_task.insert({'_key': self.key(), **self.kwargs()})
         return self.record
 
+    @classmethod
+    def get_available_tasks(cls):
+        return cls.__subclasses__()
+
 
 class DownloadTask(Task):
     """ Task to load file into system """
@@ -230,8 +234,7 @@ class Pipeline(ArangoModuleMixin):
         yield from self.task_graph.task_ordered
 
     def kwargs(self):
-        return {'name': self.name, 'variables': self.variables,
-                'tasks': [task.construct_record() for task in self.task_graph.task_ordered]}
+        return {'name': self.name, 'variables': self.variables}
 
     def key(self):
         return f'{self.name}'

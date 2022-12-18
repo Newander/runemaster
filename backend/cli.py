@@ -28,17 +28,13 @@ def list_pipelines(pipeline: str = None) -> list[AggPipeline]:
 
     return list(get_db().aql.execute(f'''
         for pipe in pipeline {filter_}
-        return {{key: pipe._key, name: pipe.name, variables: count(pipe.variables), tasks: count(pipe.tasks)}}
+        let tasks_count = count(for t in task filter t.pipeline_key == pipe._key return t)
+        return {{key: pipe._key, name: pipe.name, variables: count(pipe.variables), tasks: tasks_count}}
     ''').batch())
 
 
 def list_tasks(pipeline_key: str) -> list[TaskModel]:
-    return list(
-        get_db().aql.execute(
-            ' for t in task filter t.pipeline_key == @pipe_key return t ',
-            bind_vars={'pipe_key': pipeline_key}
-        ).batch()
-    )
+    return list(get_collection('task').find({'pipeline_key': pipeline_key}).batch())
 
 
 def remove_pipeline(pipeline_key: str):
@@ -48,9 +44,9 @@ def remove_pipeline(pipeline_key: str):
 
 
 def remove_task(pipeline_key: str, task_key: str):
+    """ Removing task collection records and next edge records """
     task_col = get_collection('task')
     next_col = get_collection('next')
-    # todo: this will work only for one output
     next_edge_id = f'task/{task_key}'
     all_nexts: list[NextModel] = list(next_col.find({'pipeline_key': pipeline_key}).batch())
 

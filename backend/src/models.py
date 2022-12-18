@@ -15,7 +15,14 @@ class EdgeModel(ArangoReturnDict):
     _to: str
 
 
+class PipelineModel(ArangoReturnDict):
+    """ Collection [pipeline] """
+    name: str
+    variables: dict
+
+
 class TaskModel(ArangoReturnDict):
+    """ Collection [task] """
     pipeline_key: str
     name: str
     attributes: dict

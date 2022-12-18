@@ -5,9 +5,11 @@
         > python manage.py backend run
 """
 import sys
+from typing import Type
 
 from backend.cli import list_pipelines, list_tasks, remove_pipeline, remove_task
 from backend.server.run import run_server
+from backend.src.main import Pipeline, Task
 from backend.src.models import TaskModel
 from backend.utils import get_collection
 
@@ -55,11 +57,71 @@ def show_rm_task(pipeline: str, task: str):
     print(f'Task [{pipeline}:{task}] is removed')
 
 
-def show_add_pipeline():
-    ...
+def add_another_task(new_pipeline: Pipeline):
+    print('Choose the task type:')
+    print('[', ', '.join(task.__name__ for task in Task.get_available_tasks()), ']')
+    task_type = input('> ')
+    print('Choose the task name:')
+    task_name = input('> ')
+
+    TaskCls: Type[Task] = next(task for task in Task.get_available_tasks() if task.__name__ == task_type)
+    task_instance = TaskCls(new_pipeline.name, task_name)
+
+    input_attributes = {}
+    for attr in TaskCls.input_attributes:
+        attr_name = attr["name"]
+        if attr.get('optional') and \
+                input(f'This field [{attr_name}] is optional, do you wish to skip it? [Y/N]') in ('Y',):
+            continue
+
+        match attr['type']:
+            case 'input':
+                attr_value = input(f'Type the value of [{attr_name}]: > ')
+            case 'choose':
+                print(f'Select one of the accessible values (by number) for the attribute [{attr_name}]:')
+                attr_dict = {
+                    i + 1: print(f'{i + 1}.', variant) and variant for i, variant in enumerate(attr['variants'])
+                }
+                attr_num = input('Your choice:')
+                attr_value = attr_dict[attr_num]
+            case _:
+                raise NotImplementedError
+
+        input_attributes[attr['id']] = attr_value
+    task_instance.set_input_attributes(**input_attributes)
+    return task_instance
 
 
-def show_add_task():
+def interactive_add_pipeline():
+    print('Interactive pipeline creation interface runs')
+
+    print('Enter the pipeline`s name')
+    pipeline_name = input('> ')
+    new_pipeline = Pipeline(pipeline_name)
+
+    print(f'Do you wish to add a task to [{new_pipeline.name}] pipeline? [Y/N]')
+    is_add_new_task = input('> ') in ('', 'Y')
+    task_graph = None
+    while is_add_new_task:
+        another_task = add_another_task(new_pipeline)
+        if task_graph is None:
+            task_graph = another_task
+        else:
+            task_graph = task_graph >> another_task
+        print(f'Do you wish to add a task to [{new_pipeline.name}] pipeline? [Y/N]')
+        is_add_new_task = input('> ') in ('', 'Y')
+
+    print('Do you wish to add custom variables to the pipeline?')
+    is_add_variable = input('> ') in ('', 'Y')
+    while is_add_variable:
+        new_pipeline.variables[input('Key:')] = input('Value:')
+
+    new_pipeline.add(task_graph)
+    new_pipeline.dump()
+    print(f'Pipeline [{pipeline_name}] is created')
+
+
+def interactive_add_task():
     ...
 
 
@@ -72,22 +134,29 @@ commands_tree = {
                 'list': {
                     'commands': {
                         'pipelines': {
-                            'help': 'cli list pipelines',
+                            'help': 'help cli list pipelines',
                             'function': show_pipelines
                         },
                         'tasks': {
                             'options': {'pipeline'},
-                            'help': 'cli list tasks',
+                            'help': 'help cli list tasks',
                             'function': show_tasks
                         }
                     },
                     'help': 'help cli list'
                 },
-                'get': {
-                    'help': 'help cli get'
-
-                },
                 'add': {
+                    'commands': {
+                        'pipeline': {
+                            'help': 'cli add pipeline',
+                            'function': interactive_add_pipeline
+                        },
+                        'task': {
+                            'options': {'pipeline'},
+                            'help': 'cli add task',
+                            'function': interactive_add_task
+                        }
+                    },
                     'help': 'help cli add'
 
                 },
