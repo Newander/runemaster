@@ -6,8 +6,10 @@
 """
 import sys
 
-from backend.cli import list_pipelines, list_tasks
+from backend.cli import list_pipelines, list_tasks, remove_pipeline, remove_task
 from backend.server.run import run_server
+from backend.src.models import TaskModel
+from backend.utils import get_collection
 
 
 def show_pipelines():
@@ -18,12 +20,50 @@ def show_pipelines():
 
 def show_tasks(pipeline: str = None):
     print('Pipelines / tasks:')
-    for p in list_pipelines():
+    for p in list_pipelines(pipeline):
         print(f' - Pipeline [{p["name"]}]:')
         for t in list_tasks(p['key']):
             print(f'    - Task [{t["name"]}]: {t["task_type"]}')
 
 
+def show_rm_pipeline(pipeline: str):
+    try:
+        record_to_remove = get_collection('pipeline').find({'name': pipeline}).next()
+    except StopIteration:
+        print('Wrong pipeline name to remove:', pipeline)
+        return
+
+    remove_pipeline(record_to_remove['_key'])
+    print(f'Pipeline [{pipeline}] is removed')
+
+
+def show_rm_task(pipeline: str, task: str):
+    try:
+        pipe_record = get_collection('pipeline').find({'name': pipeline}).next()
+    except StopIteration:
+        print('The chosen pipeline has wrong name:', pipeline)
+        return
+
+    task_col = get_collection('task')
+    try:
+        record_to_remove: TaskModel = task_col.find({'pipeline_key': pipe_record['_key'], 'name': task}).next()
+    except StopIteration:
+        print('Wrong task name to remove:', task)
+        return
+
+    remove_task(pipe_record['_key'], record_to_remove['_key'])
+    print(f'Task [{pipeline}:{task}] is removed')
+
+
+def show_add_pipeline():
+    ...
+
+
+def show_add_task():
+    ...
+
+
+# Special cli interface tree
 commands_tree = {
     'help': 'CLI manager of Runemaster project',
     'commands': {
@@ -37,7 +77,7 @@ commands_tree = {
                         },
                         'tasks': {
                             'options': {'pipeline'},
-                            'help': 'backend run helper',
+                            'help': 'cli list tasks',
                             'function': show_tasks
                         }
                     },
@@ -47,7 +87,23 @@ commands_tree = {
                     'help': 'help cli get'
 
                 },
+                'add': {
+                    'help': 'help cli add'
+
+                },
                 'rm': {
+                    'commands': {
+                        'pipeline': {
+                            'options': {'pipeline'},
+                            'help': 'cli rm pipeline',
+                            'function': show_rm_pipeline
+                        },
+                        'task': {
+                            'options': {'pipeline', 'task'},
+                            'help': 'cli rm task',
+                            'function': show_rm_task
+                        }
+                    },
                     'help': 'help cli rm'
                 },
             },

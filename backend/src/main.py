@@ -201,7 +201,8 @@ class TaskGraph:
         for task_instance in self.task_ordered:
             now_task_ar = task_instance.insert(task)
             if prev_task_ar:
-                edges.insert({"_from": prev_task_ar['_id'], "_to": now_task_ar['_id']})
+                edges.insert({"_from": prev_task_ar['_id'], "_to": now_task_ar['_id'],
+                              'pipeline_key': self.pipeline_key})
             prev_task_ar = now_task_ar
 
 
