@@ -1,5 +1,6 @@
 ### Custom
 
+deploy/docker-compose.yml
 .fleet/
 
 ### JetBrains template
